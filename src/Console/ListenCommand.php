@@ -3,6 +3,7 @@
 namespace Nuwber\Events\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Cache\Repository;
 use Nuwber\Events\Console\Log;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -96,7 +97,7 @@ class ListenCommand extends Command
             $options
         );
 
-        $cache = app(Illuminate\Contracts\Cache\Repository::class);
+        $cache = app(Repository::class);
 
         (new Worker($consumer, $processor, $this->exceptions, $cache))->work($options);
     }
