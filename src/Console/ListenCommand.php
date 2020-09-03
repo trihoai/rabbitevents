@@ -96,7 +96,9 @@ class ListenCommand extends Command
             $options
         );
 
-        (new Worker($consumer, $processor, $this->exceptions))->work($options);
+        $cache = app(Illuminate\Contracts\Cache\Repository::class);
+
+        (new Worker($consumer, $processor, $this->exceptions, $cache))->work($options);
     }
 
     /**

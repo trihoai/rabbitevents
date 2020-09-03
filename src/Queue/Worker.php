@@ -3,6 +3,7 @@
 namespace Nuwber\Events\Queue;
 
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Contracts\Cache\Repository;
 use Interop\Amqp\AmqpConsumer;
 use Nuwber\Events\Queue\ProcessingOptions;
 use Nuwber\Events\Queue\MessageProcessor;
@@ -27,25 +28,35 @@ class Worker
 
     /** @var ExceptionHandler */
     private $exceptions;
+    
+    /**
+     * The cache repository implementation.
+     *
+     * @var \Illuminate\Contracts\Cache\Repository
+     */
+    protected $cache;
 
-    public function __construct(AmqpConsumer $consumer, MessageProcessor $processor, ExceptionHandler $exceptions)
+    public function __construct(AmqpConsumer $consumer, MessageProcessor $processor, ExceptionHandler $exceptions, Repository $cache)
     {
         $this->consumer = $consumer;
         $this->processor = $processor;
         $this->exceptions = $exceptions;
+        $this->cache = $cache;
     }
 
     public function work(ProcessingOptions $options)
     {
         $this->listenForSignals();
 
+        $lastRestart = $this->getTimestampOfLastQueueRestart();
+        
         while (true) {
             if ($message = $this->getNextMessage($options->timeout)) {
                 $this->processor->process($message);
 
                 $this->consumer->acknowledge($message);
             }
-            $this->stopIfNecessary($options);
+            $this->stopIfNecessary($options, $lastRestart);
         }
     }
 
@@ -78,14 +89,14 @@ class Worker
      *
      * @param  ProcessingOptions $options
      */
-    protected function stopIfNecessary(ProcessingOptions $options)
+    protected function stopIfNecessary(ProcessingOptions $options, $lastRestart)
     {
         if ($this->shouldQuit) {
             $this->stop();
-        }
-
-        if ($this->memoryExceeded($options->memory)) {
+        } else if ($this->memoryExceeded($options->memory)) {
             $this->stop(12);
+        } elseif ($this->queueShouldRestart($lastRestart)) {
+            $this->stop();
         }
     }
 
@@ -124,6 +135,29 @@ class Worker
             pcntl_signal($signal, function () {
                 $this->shouldQuit = true;
             });
+        }
+    }
+    
+    /**
+     * Determine if the queue worker should restart.
+     *
+     * @param  int|null  $lastRestart
+     * @return bool
+     */
+    protected function queueShouldRestart($lastRestart)
+    {
+        return $this->getTimestampOfLastQueueRestart() != $lastRestart;
+    }
+
+    /**
+     * Get the last queue restart timestamp, or null.
+     *
+     * @return int|null
+     */
+    protected function getTimestampOfLastQueueRestart()
+    {
+        if ($this->cache) {
+            return $this->cache->get('illuminate:queue:restart');
         }
     }
 }
